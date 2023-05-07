@@ -1,0 +1,29 @@
+version: '3.7'
+services:
+
+  thelounge:
+    image: thelounge/thelounge
+    ports:
+      - 9001:9000
+            #- 49.12.202.218:113:9001
+    restart: always
+    volumes:
+      - ./config.js:/var/opt/thelounge/config.js # bind lounge config from the host's file system
+      - ./custom/public/img:/usr/local/share/.config/yarn/global/node_modules/thelounge/public/img
+      - ./custom/public/themes:/thelounge/public/themes
+      - ./custom/public/favicon.ico:/usr/local/share/.config/yarn/global/node_modules/thelounge/public/favicon.ico
+    networks:
+      - nginx
+      - web
+        #command:   sed -i 's/The Lounge/Open Chat on DNBRADIO (IRC) - dnbradio.com/g' /usr/local/share/.config/yarn/global/node_modules/thelounge/client/index.html.tpl
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.thelounge.rule=Host(`chat.dnbradio.com`) && PathPrefix(`/`)"
+      - "traefik.http.routers.thelounge.entrypoints=websecure"
+      - "traefik.http.routers.thelounge.tls.certresolver=letsencrypt"
+      - "traefik.http.services.thelounge.loadbalancer.server.port=9000" 
+networks:
+  nginx:
+    external: true
+  web:
+    external: true
