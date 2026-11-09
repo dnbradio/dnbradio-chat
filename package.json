@@ -1,0 +1,11 @@
+{
+  "name": "dnbradio-chat-deployment-tests",
+  "private": true,
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests -v",
+    "test:integration": "node --test tests/outage.test.cjs"
+  },
+  "devDependencies": {
+    "socket.io-client": "4.8.1"
+  }
+}
