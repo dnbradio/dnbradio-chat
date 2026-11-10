@@ -30,7 +30,7 @@ test('ident collision removes chat route; releasing ident restores both transpor
   const loungeImage = 'thelounge/thelounge:4.4.1';
   // Production's v2.5.3 hardcodes Docker API 1.24, rejected by Docker 29.
   // Use a compatible proxy only in this local fixture; no deploy change.
-  const proxyImage = process.env.TEST_TRAEFIK_IMAGE || 'traefik:v3.6.2';
+  const proxyImage = process.env.TEST_TRAEFIK_IMAGE || 'traefik:v3.7.17@sha256:f4bb143d1135a579b630ed491e17ec50f6f7c9c6a30585ff3d385471d2a86f5a';
   const created = [];
   docker('network', 'create', prefix);
   try {

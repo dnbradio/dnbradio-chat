@@ -3,9 +3,11 @@
   "private": true,
   "scripts": {
     "test": "python3 -m unittest discover -s tests -v",
-    "test:integration": "node --test tests/outage.test.cjs"
+    "test:integration": "node --test tests/outage.test.cjs",
+    "test:security": "node --test tests/security.test.cjs"
   },
   "devDependencies": {
-    "socket.io-client": "4.8.1"
-  }
+    "socket.io-client": "4.8.4"
+  },
+  "overrides": {"ws": "8.22.2"}
 }

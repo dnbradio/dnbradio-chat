@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!runtime/
+!runtime/package.json
+!runtime/package-lock.json
+!runtime/patch-file-type.cjs
+!custom/
+!custom/**

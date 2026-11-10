@@ -48,7 +48,7 @@ npm run test:integration
 ```
 
 The integration test requires Node 18+, Python 3, and a local Docker daemon
-with `thelounge/thelounge:4.4.1` and `traefik:v3.6.2` images available. It creates
+with `thelounge/thelounge:4.4.1` and `traefik:v3.7.17` images available. It creates
 uniquely named disposable containers and a network, publishes random loopback
 ports, and removes those fixtures and their anonymous volumes afterward. The
 test proxy reads the local Docker socket with a test-specific label filter.
@@ -56,12 +56,49 @@ Use a development Docker context, never the production daemon. Its Lounge IRC
 target is locked to loopback and no IRC connect or message events are sent.
 
 Production's Traefik 2.5.3 hardcodes Docker API 1.24, which modern Docker
-daemons reject. The fixture uses 3.6.2 for local Docker compatibility only.
+daemons reject. The fixture uses 3.7.17 for local Docker compatibility only.
 On an older development daemon, set `TEST_TRAEFIK_IMAGE=traefik:v2.5.3` to test
-the deployed proxy version. This is not a production proxy-upgrade proposal.
+the deployed proxy version. The separate security rollout below proposes and validates the production upgrade.
 
 The test reproduces an occupied ident port, failed chat-container startup,
 Traefik 404s, and the actual Socket.IO client `xhr poll error`. It then releases
 the conflicting listener and verifies HTTP, polling, WebSocket, and container
 restart recovery. Unit tests cover the read-only default, both activation
 paths, failed remediation, unknown service states, and privilege checks.
+
+## Security build and upgrade preparation
+
+`Dockerfile` builds Lounge 4.5.2 on a digest-pinned Node 22.23.4 / Alpine
+3.24 base for the production `linux/amd64` platform. `runtime/package-lock.json`
+locks the complete dependency tree. Security overrides update Socket.IO,
+Engine.IO, ws, Express, its parsers, node-forge, Busboy, lodash, and linkify-it.
+The link parser stays on its compatible 5.x API. npm is removed after the build;
+Lounge's existing yarn-based package support remains available.
+
+The only source backport is the upstream non-advancing ASF-parser fix for
+`file-type` 16.5.4. A direct upgrade changes the API/module format that Lounge
+uses. The build validates both patch contexts and fails on source drift. Version
+scanners still report CVE-2026-31808 because upstream version metadata is kept
+intact. `tests/runtime-check.cjs` tests the patched malformed-input case in a
+bounded worker, plus normal image detection. Do not hide this finding without
+recording that evidence.
+
+```sh
+docker build --platform linux/amd64 -t dnbradio-chat:security-20261109 .
+npm ci --ignore-scripts
+npm test
+npm run test:integration
+npm run test:security
+```
+
+The security integration uses only disposable containers and a mock IRC server.
+It verifies branding/assets, both browser transports, IRC registration/JOIN,
+ident privacy, restart, and the Host rules used by all three live proxy services.
+It does not contact QuakeNet, send public messages, or use production credentials.
+
+Production uses the standalone `deploy/chat.compose.yml`, with the existing
+data volume explicitly required and only ident published. Do **not** merge it
+with the legacy root Compose file, because merged port lists can retain the
+HTTP bypass. The proxy override preserves existing ACME settings and storage.
+See [the security rollout packet](docs/security-rollout-2026-11-09.md) before
+any production action. Production deployment requires explicit approval.
