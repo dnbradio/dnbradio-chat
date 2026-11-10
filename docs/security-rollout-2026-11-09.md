@@ -198,3 +198,84 @@ not evidence of exploitation or the cause of the ident-port outage.
   fixes CVE-2024-21626. Host maintenance is separate from the chat rollout.
 - The retained scanner finding is documented in the
   [upstream ASF parser advisory](https://github.com/sindresorhus/file-type/security/advisories/GHSA-5v7r-6r5c-r473).
+
+## Approved production rollout completed
+
+The operator explicitly approved the chat and Traefik deployment after review
+of this packet. Applied source commit `6b846ee8ebd9853549de7df43c90bce015bf4e25`
+on `dnbradio-trace` during November 9, 2026, approximately 17:19–17:22 MST
+(November 10, 00:19–00:22 UTC). Docker/containerd maintenance was not included
+in this approval and was not performed.
+
+The exact saved chat archive passed its SHA256 check on the host before load.
+Docker 25's classic image store identifies the loaded image by its config digest,
+`sha256:54af36cef36f1a1f4da1c4ca7daf3f020200bd4f5585b84c818939cebc9bcaf7`.
+This is the config referenced by the tested archive's `manifest.json`; the local
+Docker 29 containerd store reports its OCI index digest (`99a9a381…`) instead.
+No rebuild or source substitution occurred. Production is pinned to the loaded
+config digest, not the mutable tag.
+
+Persistent deployment manifests were updated at:
+
+- `/home/forge/apps/chat/docker-compose.yml`: rendered standalone manifest
+  with the image and existing external data-volume identity made explicit.
+- `/home/forge/apps/traefik/docker-compose.yml`: image line only, pinned to
+  the reviewed 3.7.17 registry digest. Resolved configuration comparison
+  confirmed no other changes.
+
+Root-only backups and private inspection evidence are retained at
+`/root/dnbradio-security-20261110-6b846ee/`. This includes original manifests,
+config/assets, original image identities, a consistent stopped-chat volume
+snapshot, consistent stopped-proxy ACME snapshots, and image-pinned rollback
+manifests. The chat rollback manifest explicitly reuses the original data volume.
+Original images remain on the host. Do not publish this directory: it contains
+credentials and certificate state.
+
+Verified after deployment:
+
+- Chat started at `2026-11-10T00:19:02.725953278Z`, Lounge 4.5.2, Node 22.23.4,
+  actual Engine.IO ws 8.22.2, UID 1000. The data-volume identity is unchanged.
+- Traefik started at `2026-11-10T00:21:14.231912363Z`, version 3.7.17.
+  Certificate mounts, Docker socket mount, published ports, and configured
+  credential environment were retained.
+- Public HTTPS homepage, branding, all eight referenced CSS/JS assets,
+  polling-only Socket.IO and WebSocket-only Socket.IO sessions pass.
+  These checks send no IRC connect or message events.
+- All seven public hostnames return their expected HTTP 200 and content types.
+  The five Shoutcast hostnames return audio bytes. Icecast's active `/main`
+  mount also returns HTTP 200 and audio bytes.
+- The served chat certificate validates normally and expires December 24,
+  2026, 02:18:13 UTC. Future ACME renewal was not forced or proven by this check.
+- Only ident TCP/113 is published by chat; TCP/9003 is unreachable externally
+  on both host IPs. Ident TCP/113 accepts a connection. Both host oidentd
+  activation units remain masked and inactive.
+- All five containers are running with zero restart counts. Shoutcast,
+  Icecast and MariaDB retained their original container IDs and start times.
+  No error-level lines were found in the new chat/proxy container logs.
+
+The first Traefik attempt served valid HTTPS, but the deployment guard compared
+mount lists in Docker's returned order and unnecessarily triggered rollback.
+The mount paths, permissions and propagation were identical. The guard was
+corrected to compare mounts sorted by destination, and the approved upgrade
+was retried successfully. One check caught a transient 404 during that rollback;
+all final checks above were performed after the successful retry. This caused
+an additional brief proxy interruption, not a stream-server restart.
+
+Node reports bundled Brotli as 1.1.0 despite including the source fix. The
+[Node 22.23.4 release notes](https://nodejs.org/en/blog/release/v22.23.4)
+explicitly record the CVE-2026-111497 cherry-pick. Do not classify that runtime
+solely from `process.versions.brotli`. The separate file-type backport remains
+scanner-visible as described above.
+
+Local non-secret probe evidence is retained in ignored `security-evidence/`:
+`chat-after-upgrade.log`, `chat-after-proxy.log`, `routes-before.json`, and
+`routes-after.json`. The server has approximately 939 MiB free (98% used)
+after rollout. Before the separately approved host-runtime maintenance,
+identify safe disk reclamation or expansion and verify a recovery backup.
+No existing files, images, or volumes were pruned during this deployment.
+
+Remaining work: schedule Docker/containerd/runc maintenance with recovery and
+disk-capacity preparation. The separate show-title investigation is recorded in
+`docs/incident-2026-11-09.md`; correlate a failed submission with AzuraCast and
+scheduler evidence before changing live metadata behavior. Retain the rollout
+backups and local image artifact until the recovery window is closed explicitly.
