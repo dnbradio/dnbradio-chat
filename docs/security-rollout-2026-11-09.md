@@ -1,0 +1,361 @@
+# Security remediation approval packet
+
+Target: `78.46.229.41` (`dnbradio-trace`), inspected 2026-11-09.
+This packet is preparation, not authorization to mutate production. The
+operator authorized investigation and local implementation. Explicit approval
+of the production scope below is required before rollout.
+
+## Changes prepared
+
+1. Replace chat's 4.4.1 image with the tested custom Lounge 4.5.2 image built
+   for linux/amd64 on Node 22.23.4 and Alpine 3.24. Patched dependencies are
+   locked in `runtime/package-lock.json`. Preserve the existing config and data
+   volume. Serve branding assets from the image. Publish only public ident
+   TCP/113, not plaintext HTTP/9003. Chat remains reachable through Traefik.
+2. Replace Traefik 2.5.3 with
+   `traefik:v3.7.17@sha256:f4bb143d1135a579b630ed491e17ec50f6f7c9c6a30585ff3d385471d2a86f5a`.
+   Keep existing command flags, Cloudflare credentials, ACME storage, network,
+   and published ports. No certificate renewal or DNS challenge is deliberately
+   triggered by the local test. Live issuance/renewal must be verified after
+   deployment using the retained state and normal proxy logs.
+3. In a separate host maintenance stage, upgrade exactly:
+   - `docker-ce=5:29.9.3-1~ubuntu.22.04~jammy`
+   - `docker-ce-cli=5:29.9.3-1~ubuntu.22.04~jammy`
+   - `containerd.io=2.4.2-3~ubuntu.22.04~jammy`
+   The candidate containerd package was downloaded locally, verified against
+   the host APT metadata SHA256
+   `1d41c79fe4cb891ecd1462ed3d0e247afdc9d67c752af87707c500588101029f`, and its
+   extracted runc binary reports **1.5.2**. No packages were installed on the
+   server. The native APT simulation proposes three upgrades, no removals,
+   and no unrelated package upgrades.
+
+## Security scope
+
+- Supported, security-patched Node runtime addresses the identified bundled
+  Brotli exposure. Existing public link previews remain enabled after patching.
+- ws 8.22.2 and Engine.IO 6.6.11 address the WebSocket and polling DoS findings.
+- Lounge 4.5.2 includes the upstream ident peer-address fix.
+- Express 4.22.3, body-parser 1.20.9, path-to-regexp 0.1.13, node-forge 1.4.3,
+  Busboy 3.2.5, lodash 4.18.1, and linkify-it 5.0.2 replace affected dependencies.
+- file-type 16.5.4 receives the upstream fix for CVE-2026-31808 /
+  GHSA-5v7r-6r5c-r473, commit
+  `319abf871b50ba2fa221b4a7050059f1ae096f4f`, backported with exact-context guards.
+  Its original version remains visible to scanners. This is a source-patched
+  finding, not an unexamined suppression.
+- zlib is updated to Alpine package 1.4-r0. npm's build-only dependency tree
+  is removed from the final image. The running application is UID 1000, with
+  capabilities dropped and `no-new-privileges` enabled.
+- The separate host ident service/socket remain masked. Do not undo the
+  completed availability fix while upgrading the application ident listener.
+
+## Data and rollback prerequisites
+
+Before changing production, create a root-only timestamped release/rollback
+directory and save:
+
+- Existing chat/proxy image IDs, inspect state, manifests, restart policies,
+  and running container start times.
+- `/home/forge/apps/chat/config.js`, current chat Compose file, and its custom
+  assets. Do not print config contents or put secrets into this repository.
+- A consistent backup of the existing Lounge data volume
+  `ccef0d68e8f121eb0ee126698c75925f50283467f2ed1d5c5151f209ad5abd69`.
+  Stop chat for the backup immediately before replacement. The public-mode
+  sessions will reconnect; in-memory scrollback is not durable across restart.
+- Proxy Compose file and `/home/forge/apps/traefik/letsencrypt` ACME data,
+  preserving permissions. Keep credential files on the host.
+
+Do not recreate the data volume, delete the old images, run `compose down -v`,
+or use the legacy root `docker-compose.yml` for the new chat service.
+
+For stage 3, additionally require a verified host/volume recovery backup and
+a maintenance window covering all running containers. Package downgrade alone
+is **not** a verified rollback for a Docker/containerd major-version migration.
+If those recovery prerequisites are missing, execute approved chat/proxy
+stages only and leave host maintenance pending explicitly.
+
+## Deployment order after approval
+
+Use the committed files and the exact tested chat image ID recorded with the
+validation evidence. Transfer a saved image archive or use a private registry
+digest; do not rebuild from floating tags on the production host.
+
+For chat, export the reviewed image ID as `CHAT_IMAGE`, set
+`CHAT_BIND_IP=78.46.229.41`, and set `CHAT_DATA_VOLUME` to the existing volume
+above. Check `scripts/reserve-ident-port.sh --check`, then render the new
+standalone manifest for inspection with:
+
+```sh
+docker compose -p chat -f /path/to/reviewed/deploy/chat.compose.yml config
+```
+
+After backups, replace only this service:
+
+```sh
+docker compose -p chat -f /path/to/reviewed/deploy/chat.compose.yml up -d --no-deps thelounge
+```
+
+The manifest uses explicit router/service names matching the deployed `chat`
+router. Do not combine it with the original manifest: Compose port-list
+merging could preserve public TCP/9003. Check the actual published ports after
+creation, not only the YAML.
+
+For Traefik, use its existing Compose file plus the reviewed image-only override:
+
+```sh
+docker compose -p traefik -f /home/forge/apps/traefik/docker-compose.yml -f /path/to/reviewed/deploy/traefik.override.yml up -d --no-deps traefik
+```
+
+Verify chat and the stream routers before stage 3. Upgrade Traefik **before**
+Docker: the old proxy hardcodes Docker API 1.24, which the newer daemon rejects.
+
+Run the exact package upgrades only under the separately approved maintenance
+stage with the verified recovery backup. Re-run the APT simulation first and
+stop on changed versions, removals, or additional effects. Docker live restore
+is currently **false**. Expect interruption/reconnection of chat, Shoutcast,
+Icecast, Traefik and MariaDB. Do not silently enable live restore as a workaround.
+
+## Acceptance and rollback
+
+After each application stage: verify HTTPS root and assets, polling-only and
+WebSocket-only sessions, expected image/version, logs, container health, and
+that the intended data volume is retained. Confirm TCP/9003 is no longer
+publicly published/reachable and TCP/113 is still Docker-owned. Do not send
+public IRC messages as a smoke test. The local test covers IRC registration,
+JOIN, and ident peer isolation using a disposable mock server.
+
+Proxy routes to verify: `chat.dnbradio.com`, `source.dnbradio.com`,
+`fw.dnbradio.com`, `streams.dnbradio.com`, `samlegacy.dnbradio.com`,
+`trace.dnbradio.com`, `ices.dnbradio.com`. Local fixture tests verify Host
+matching, not the real stream content or DNS/ACME integration. Record live
+pre-change status/content type for each route and compare after rollout.
+
+After host maintenance, verify all five previously running containers return,
+Docker and containerd versions match the approved packages, and the active
+runc version is patched. Run a read-only MariaDB health check and verify live
+stream availability without publishing or altering broadcasts.
+
+For chat failure, restore the original image and original standalone manifest,
+using the same named Compose project and volume; restore the saved volume if
+the newer app changed persistent data. This rollback reintroduces old security
+risks, so keep it brief and record which risks returned. For proxy failure,
+restore the original image/config and saved ACME state if necessary. Do not
+roll back Traefik to 2.5.3 while retaining the newer Docker daemon.
+
+## Validation evidence
+
+Validated locally on 2026-11-09 (America/Denver), without production upgrades:
+
+- Candidate image: `dnbradio-chat:security-20261109`, linux/amd64.
+- Docker image identity:
+  `sha256:99a9a381647e9970b28f1796bb01faae7bf3db2b60bb14b6f0057ebb6d5d1ea8`.
+- Saved archive: `security-evidence/dnbradio-chat-security-20261109.tar`.
+- Archive SHA256:
+  `6e769a2f81c2069293bbd62bf0d4176131346a5389d04f3f73602f8eb14edcb8`.
+- `npm test`: 12 tests pass, including ident ownership and fail-closed
+  deployment rendering with preservation of the existing volume.
+- `npm run test:integration`: passes the occupied-ident-port reproduction,
+  proxy 404 / actual client xhr poll error, and transport/restart recovery.
+- `npm run test:security`: passes runtime checks, HTTPS and HTTP redirect,
+  branding/assets, polling-only and WebSocket-only sessions, mock IRC JOIN,
+  ident peer isolation, all shared proxy Host rules, and chat restart recovery.
+  The client resolves the production hostname exclusively to the loopback
+  fixture. Untrusted TLS is allowed only for this disposable local fixture.
+- Trivy 0.72.0 candidate image scan: zero HIGH/CRITICAL findings; one MEDIUM
+  version-based finding, CVE-2026-31808 in file-type 16.5.4. The source backport
+  and bounded malformed-ASF regression cover this finding. It is retained in
+  raw output, not suppressed. This is not a claim of vulnerability absence.
+- Runtime npm audit: zero high/critical; two moderate dependency records
+  (file-type and its dependent Lounge), attributable to the same backport.
+  Development npm audit: zero findings.
+
+Raw build, audit, and test logs remain in ignored `security-evidence/`.
+Real ACME/DNS integration, stream content, and host-package upgrade recovery
+require the approved deployment checks above; local marker backends cannot
+establish those outcomes.
+
+## Advisory evidence and prioritization
+
+The inspected live runtime was Lounge 4.4.1, Node 18.18.2 (Brotli 1.0.9),
+ws 8.11.0, Traefik 2.5.3 and runc 1.1.12. These are installed-version findings,
+not evidence of exploitation or the cause of the ident-port outage.
+
+- Prioritize the Node runtime because link previews automatically decompress
+  remote responses. Brotli CVE-2026-111497 affects its installed version and
+  appears in CISA KEV. See the [Node security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+  and [NVD record with KEV entry](https://nvd.nist.gov/vuln/detail/CVE-2026-111497).
+- The installed ws is affected by CVE-2026-48779 (fragmentation memory DoS),
+  CVE-2024-37890 (header DoS), and the conditional disclosure CVE-2026-45736.
+  See the [upstream fragmentation advisory](https://github.com/websockets/ws/security/advisories/GHSA-96hv-2xvq-fx4p).
+  The examined stock Lounge 4.5.2 image still carried ws 8.11.0, so upgrading
+  Lounge alone is insufficient; test the actual nested runtime dependency.
+- Lounge's [ident disclosure advisory](https://github.com/thelounge/thelounge/security/advisories/GHSA-g49q-jw42-6x85)
+  has no CVE identifier and is fixed from 4.5.0. Our mock test verifies both
+  valid ident replies and rejection of a different peer's query.
+- Traefik findings include CVE-2022-39271, CVE-2024-28869 and
+  CVE-2024-45410 (DoS and forwarded-header manipulation).
+- runc findings include CVE-2025-31133, CVE-2025-52565 and CVE-2025-52881;
+  exploitation has container/race prerequisites. Installed runc 1.1.12 already
+  fixes CVE-2024-21626. Host maintenance is separate from the chat rollout.
+- The retained scanner finding is documented in the
+  [upstream ASF parser advisory](https://github.com/sindresorhus/file-type/security/advisories/GHSA-5v7r-6r5c-r473).
+
+## Approved production rollout completed
+
+The operator explicitly approved the chat and Traefik deployment after review
+of this packet. Applied source commit `6b846ee8ebd9853549de7df43c90bce015bf4e25`
+on `dnbradio-trace` during November 9, 2026, approximately 17:19–17:22 MST
+(November 10, 00:19–00:22 UTC). Docker/containerd maintenance was not included
+in this approval and was not performed.
+
+The exact saved chat archive passed its SHA256 check on the host before load.
+Docker 25's classic image store identifies the loaded image by its config digest,
+`sha256:54af36cef36f1a1f4da1c4ca7daf3f020200bd4f5585b84c818939cebc9bcaf7`.
+This is the config referenced by the tested archive's `manifest.json`; the local
+Docker 29 containerd store reports its OCI index digest (`99a9a381…`) instead.
+No rebuild or source substitution occurred. Production is pinned to the loaded
+config digest, not the mutable tag.
+
+Persistent deployment manifests were updated at:
+
+- `/home/forge/apps/chat/docker-compose.yml`: rendered standalone manifest
+  with the image and existing external data-volume identity made explicit.
+- `/home/forge/apps/traefik/docker-compose.yml`: image line only, pinned to
+  the reviewed 3.7.17 registry digest. Resolved configuration comparison
+  confirmed no other changes.
+
+Root-only backups and private inspection evidence are retained at
+`/root/dnbradio-security-20261110-6b846ee/`. This includes original manifests,
+config/assets, original image identities, a consistent stopped-chat volume
+snapshot, consistent stopped-proxy ACME snapshots, and image-pinned rollback
+manifests. The chat rollback manifest explicitly reuses the original data volume.
+Original images remain on the host. Do not publish this directory: it contains
+credentials and certificate state.
+
+Verified after deployment:
+
+- Chat started at `2026-11-10T00:19:02.725953278Z`, Lounge 4.5.2, Node 22.23.4,
+  actual Engine.IO ws 8.22.2, UID 1000. The data-volume identity is unchanged.
+- Traefik started at `2026-11-10T00:21:14.231912363Z`, version 3.7.17.
+  Certificate mounts, Docker socket mount, published ports, and configured
+  credential environment were retained.
+- Public HTTPS homepage, branding, all eight referenced CSS/JS assets,
+  polling-only Socket.IO and WebSocket-only Socket.IO sessions pass.
+  These checks send no IRC connect or message events.
+- All seven public hostnames return their expected HTTP 200 and content types.
+  The five Shoutcast hostnames return audio bytes. Icecast's active `/main`
+  mount also returns HTTP 200 and audio bytes.
+- The served chat certificate validates normally and expires December 24,
+  2026, 02:18:13 UTC. Future ACME renewal was not forced or proven by this check.
+- Only ident TCP/113 is published by chat; TCP/9003 is unreachable externally
+  on both host IPs. Ident TCP/113 accepts a connection. Both host oidentd
+  activation units remain masked and inactive.
+- All five containers are running with zero restart counts. Shoutcast,
+  Icecast and MariaDB retained their original container IDs and start times.
+  No error-level lines were found in the new chat/proxy container logs.
+
+The first Traefik attempt served valid HTTPS, but the deployment guard compared
+mount lists in Docker's returned order and unnecessarily triggered rollback.
+The mount paths, permissions and propagation were identical. The guard was
+corrected to compare mounts sorted by destination, and the approved upgrade
+was retried successfully. One check caught a transient 404 during that rollback;
+all final checks above were performed after the successful retry. This caused
+an additional brief proxy interruption, not a stream-server restart.
+
+Node reports bundled Brotli as 1.1.0 despite including the source fix. The
+[Node 22.23.4 release notes](https://nodejs.org/en/blog/release/v22.23.4)
+explicitly record the CVE-2026-111497 cherry-pick. Do not classify that runtime
+solely from `process.versions.brotli`. The separate file-type backport remains
+scanner-visible as described above.
+
+Local non-secret probe evidence is retained in ignored `security-evidence/`:
+`chat-after-upgrade.log`, `chat-after-proxy.log`, `routes-before.json`, and
+`routes-after.json`. The server has approximately 939 MiB free (98% used)
+after rollout. Before the separately approved host-runtime maintenance,
+identify safe disk reclamation or expansion and verify a recovery backup.
+No existing files, images, or volumes were pruned during this deployment.
+
+Remaining work: schedule Docker/containerd/runc maintenance with recovery and
+disk-capacity preparation. The separate show-title investigation is recorded in
+`docs/incident-2026-11-09.md`; correlate a failed submission with AzuraCast and
+scheduler evidence before changing live metadata behavior. Retain the rollout
+backups and local image artifact until the recovery window is closed explicitly.
+
+## Host maintenance follow-on preflight
+
+After the operator's follow-on “go ahead”, read-only preflight confirmed:
+
+- Hetzner server `43100204` (`dnbradio-trace`) has no backup window, no current
+  backup images, and no attached volumes. The latest available trace snapshot
+  is dated February 8, 2024; it is not an adequate current recovery point.
+- The exact APT simulation still upgrades only the three reviewed packages,
+  with no additions or removals. No package installation was performed.
+- Root filesystem free space is about 935 MiB. The stopped legacy `www-www-1`
+  container holds approximately 16 GB of writable data, almost entirely in
+  `/tmp`. It stopped on October 22 and has restart policy `no`. Its full ID is
+  `6b9237822053d2858495040710b63cced0e5ac2eddd212df1b2890adc24d6521`.
+  Its temporary directory contains 23,898 other files totaling 15,986,961,602
+  bytes and nine tiny PHP session files. The other files have not been
+  established to be safely disposable. Do not delete the overlay directory.
+- Journals occupy approximately 3.7 GiB. No journal vacuum, container removal,
+  image prune, or volume deletion was performed.
+
+Recommended next step: obtain a current consistent recovery snapshot before
+any runtime upgrade or destructive reclamation. A separate explicit request
+for approval of the billable snapshot and associated service stop was presented
+in-thread. That request is pending; silence does not approve it. Then identify
+and approve exact cleanup targets, preserve recovery artifacts, and execute the
+reviewed package upgrade with all five container and public route checks.
+
+## Approved host runtime maintenance completed
+
+After explicit approval of the new billable snapshot and consistent service
+stop, created Hetzner snapshot **454293139**, description
+`dnbradio-trace-pre-runtime-20261110-0155`. The API reports `available`, source
+server `43100204`, disk size 40 GB and image size approximately 8.68 GB.
+The snapshot is a retained recovery artifact; a restore drill was not performed.
+
+Stopped the five running containers before snapshot creation. MariaDB exited
+cleanly (exit 0). Icecast exceeded the 60-second grace period and exited 137,
+with OOM false; its recovery and actual audio output were explicitly checked.
+The snapshot was created at `2026-11-10T01:56:32Z` and confirmed available
+before package installation. Services returned around `01:58:14–01:58:21Z`.
+
+Reclaimed 316,373,280 bytes by copying exactly this cached installer off-host,
+checking matching SHA256, and unlinking only the original cache file:
+`/var/cache/apt/archives/linux-firmware_20220329.git681281e4-0ubuntu3.42_all.deb`.
+SHA256: `ca7b1966610574959c044476f905761fb37a2cf2c0ea87778286a6f921afdcf1`.
+The copy is retained in local ignored `security-evidence/`. Installed firmware
+was not changed. No containers, images, volumes, journals, or application files
+were removed. Free disk space after maintenance is approximately 1.3 GB.
+
+The guarded upgrade script rechecked the simulation (exactly three packages,
+no removals), snapshot availability receipt, and free space. It ran under
+`dnbradio-runtime-upgrade-20261110.service` so an SSH disconnect would not
+interrupt package installation. Existing configuration was retained and
+unrelated service restarts were suppressed. Installed and verified:
+
+- Docker CE and CLI `5:29.9.3-1~ubuntu.22.04~jammy` (daemon 29.9.3, API 1.56).
+- containerd.io `2.4.2-3~ubuntu.22.04~jammy` (containerd 2.4.2).
+- runc 1.5.2 from the reviewed containerd package.
+
+Remote private evidence is in `/root/dnbradio-runtime-20261110/`, including
+before/after inspect state, package simulation/install logs, upgrade script,
+snapshot receipt and completion marker. Final verification:
+
+- All five containers running, zero restart counts, same IDs/images/mounts.
+- Public HTTPS chat, branding, eight assets, polling and WebSocket pass.
+- All seven public hostnames match pre-maintenance HTTP status/content type.
+  Shoutcast routes and Icecast `/main` return actual audio bytes.
+- MariaDB socket-authenticated read-only `SELECT 1` returns 1; credentials were
+  not printed or placed in command arguments.
+- No new error-level/fatal/panic log matches in the five containers.
+- Chat still publishes only ident TCP/113; host oidentd units remain masked.
+- Docker and containerd package installation completed successfully; no reboot
+  or unrelated package upgrade was performed.
+
+Retain snapshot 454293139, application rollback backups, local image archive,
+and the copied firmware installer pending an explicit retention/cleanup decision.
+The retired 16 GB `www-www-1` container remains untouched. Recommended next
+capacity action is approval to remove that exact stopped container after review
+of its retirement/recovery requirements, without deleting bind mounts or volumes.
+Show-title findings remain a separate application fix and correlation task.

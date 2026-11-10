@@ -1,0 +1,31 @@
+# Production-only replacement manifest. Do not combine with the legacy root
+# Compose file: port lists merge and could retain the public HTTP bypass.
+services:
+  thelounge:
+    image: ${CHAT_IMAGE:?Set the reviewed image ID or immutable registry digest}
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "${CHAT_BIND_IP:?Set the existing chat host IP}:113:9001"
+    volumes:
+      - chat-data:/var/opt/thelounge
+      - /home/forge/apps/chat/config.js:/var/opt/thelounge/config.js:ro
+    networks: [web]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.chat.rule=Host(`chat.dnbradio.com`) && PathPrefix(`/`)"
+      - "traefik.http.routers.chat.entrypoints=websecure"
+      - "traefik.http.routers.chat.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.chat.service=chat"
+      - "traefik.http.services.chat.loadbalancer.server.port=9000"
+networks:
+  web:
+    external: true
+volumes:
+  chat-data:
+    external: true
+    name: ${CHAT_DATA_VOLUME:?Set the existing inspected Lounge data volume}
