@@ -305,3 +305,57 @@ for approval of the billable snapshot and associated service stop was presented
 in-thread. That request is pending; silence does not approve it. Then identify
 and approve exact cleanup targets, preserve recovery artifacts, and execute the
 reviewed package upgrade with all five container and public route checks.
+
+## Approved host runtime maintenance completed
+
+After explicit approval of the new billable snapshot and consistent service
+stop, created Hetzner snapshot **454293139**, description
+`dnbradio-trace-pre-runtime-20261110-0155`. The API reports `available`, source
+server `43100204`, disk size 40 GB and image size approximately 8.68 GB.
+The snapshot is a retained recovery artifact; a restore drill was not performed.
+
+Stopped the five running containers before snapshot creation. MariaDB exited
+cleanly (exit 0). Icecast exceeded the 60-second grace period and exited 137,
+with OOM false; its recovery and actual audio output were explicitly checked.
+The snapshot was created at `2026-11-10T01:56:32Z` and confirmed available
+before package installation. Services returned around `01:58:14–01:58:21Z`.
+
+Reclaimed 316,373,280 bytes by copying exactly this cached installer off-host,
+checking matching SHA256, and unlinking only the original cache file:
+`/var/cache/apt/archives/linux-firmware_20220329.git681281e4-0ubuntu3.42_all.deb`.
+SHA256: `ca7b1966610574959c044476f905761fb37a2cf2c0ea87778286a6f921afdcf1`.
+The copy is retained in local ignored `security-evidence/`. Installed firmware
+was not changed. No containers, images, volumes, journals, or application files
+were removed. Free disk space after maintenance is approximately 1.3 GB.
+
+The guarded upgrade script rechecked the simulation (exactly three packages,
+no removals), snapshot availability receipt, and free space. It ran under
+`dnbradio-runtime-upgrade-20261110.service` so an SSH disconnect would not
+interrupt package installation. Existing configuration was retained and
+unrelated service restarts were suppressed. Installed and verified:
+
+- Docker CE and CLI `5:29.9.3-1~ubuntu.22.04~jammy` (daemon 29.9.3, API 1.56).
+- containerd.io `2.4.2-3~ubuntu.22.04~jammy` (containerd 2.4.2).
+- runc 1.5.2 from the reviewed containerd package.
+
+Remote private evidence is in `/root/dnbradio-runtime-20261110/`, including
+before/after inspect state, package simulation/install logs, upgrade script,
+snapshot receipt and completion marker. Final verification:
+
+- All five containers running, zero restart counts, same IDs/images/mounts.
+- Public HTTPS chat, branding, eight assets, polling and WebSocket pass.
+- All seven public hostnames match pre-maintenance HTTP status/content type.
+  Shoutcast routes and Icecast `/main` return actual audio bytes.
+- MariaDB socket-authenticated read-only `SELECT 1` returns 1; credentials were
+  not printed or placed in command arguments.
+- No new error-level/fatal/panic log matches in the five containers.
+- Chat still publishes only ident TCP/113; host oidentd units remain masked.
+- Docker and containerd package installation completed successfully; no reboot
+  or unrelated package upgrade was performed.
+
+Retain snapshot 454293139, application rollback backups, local image archive,
+and the copied firmware installer pending an explicit retention/cleanup decision.
+The retired 16 GB `www-www-1` container remains untouched. Recommended next
+capacity action is approval to remove that exact stopped container after review
+of its retirement/recovery requirements, without deleting bind mounts or volumes.
+Show-title findings remain a separate application fix and correlation task.
