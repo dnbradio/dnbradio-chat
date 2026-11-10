@@ -279,3 +279,29 @@ disk-capacity preparation. The separate show-title investigation is recorded in
 `docs/incident-2026-11-09.md`; correlate a failed submission with AzuraCast and
 scheduler evidence before changing live metadata behavior. Retain the rollout
 backups and local image artifact until the recovery window is closed explicitly.
+
+## Host maintenance follow-on preflight
+
+After the operator's follow-on “go ahead”, read-only preflight confirmed:
+
+- Hetzner server `43100204` (`dnbradio-trace`) has no backup window, no current
+  backup images, and no attached volumes. The latest available trace snapshot
+  is dated February 8, 2024; it is not an adequate current recovery point.
+- The exact APT simulation still upgrades only the three reviewed packages,
+  with no additions or removals. No package installation was performed.
+- Root filesystem free space is about 935 MiB. The stopped legacy `www-www-1`
+  container holds approximately 16 GB of writable data, almost entirely in
+  `/tmp`. It stopped on October 22 and has restart policy `no`. Its full ID is
+  `6b9237822053d2858495040710b63cced0e5ac2eddd212df1b2890adc24d6521`.
+  Its temporary directory contains 23,898 other files totaling 15,986,961,602
+  bytes and nine tiny PHP session files. The other files have not been
+  established to be safely disposable. Do not delete the overlay directory.
+- Journals occupy approximately 3.7 GiB. No journal vacuum, container removal,
+  image prune, or volume deletion was performed.
+
+Recommended next step: obtain a current consistent recovery snapshot before
+any runtime upgrade or destructive reclamation. A separate explicit request
+for approval of the billable snapshot and associated service stop was presented
+in-thread. That request is pending; silence does not approve it. Then identify
+and approve exact cleanup targets, preserve recovery artifacts, and execute the
+reviewed package upgrade with all five container and public route checks.
